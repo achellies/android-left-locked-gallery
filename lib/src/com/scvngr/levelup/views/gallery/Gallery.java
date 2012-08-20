@@ -34,8 +34,8 @@ import android.view.SoundEffectConstants;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.animation.DecelerateInterpolator;
 import android.view.animation.Transformation;
-import android.widget.Scroller;
 
 /**
  * A view that shows items in a center-locked, horizontally scrolling list.
@@ -57,6 +57,7 @@ import android.widget.Scroller;
  * @attr ref android.R.styleable#Gallery_gravity
  * CHECKSTYLE:ON
  */
+// @formatter:off
 public final class Gallery extends AbsSpinner implements GestureDetector.OnGestureListener {
 
     /**
@@ -176,6 +177,8 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
      * the children are ordered right to left.
      */
     private boolean mIsRtl = true;
+
+	private int mLastDeltaX;
 
     /**
      * Constructor.
@@ -349,14 +352,9 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
 
         final boolean toLeft = deltaX < 0;
 
-        final int limitedDeltaX = getLimitedMotionScrollAmount(toLeft, deltaX);
-        if (limitedDeltaX != deltaX) {
-            // The above call returned a limited amount, so stop any scrolls/flings
-            mFlingRunnable.endFling(false);
-            onFinishedMovement();
-        }
+        mLastDeltaX = deltaX;
 
-        offsetChildrenLeftAndRight(limitedDeltaX);
+        offsetChildrenLeftAndRight(deltaX);
 
         detachOffScreenChildren(toLeft);
 
@@ -617,6 +615,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
     @Override
     void layout(final int delta, final boolean animate) {
 
+
         mIsRtl = false;
 
         if (mDataChanged) {
@@ -632,6 +631,17 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         // Update to the new selected position.
         if (mNextSelectedPosition >= 0) {
             setSelectedPositionInt(mNextSelectedPosition);
+        }
+
+        // find the leftmost edge of the current children.
+        // As this Gallery variant doesn't snap, this
+        // is used to layout out the selected item.
+        int previousLeftmost = 0;
+        if (getChildCount() > 1){
+	        View v = getChildAt(mLastDeltaX > 0 ? 0 : 1);
+	        if (v != null){
+	           previousLeftmost = v.getLeft();
+	        }
         }
 
         // All views go in recycler while we are in layout
@@ -657,7 +667,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         final View sel = makeAndAddView(mSelectedPosition, 0, 0, true);
 
         // Put the selected child at the lockPoint
-        sel.offsetLeftAndRight(getGalleryLockPoint());
+        sel.offsetLeftAndRight(previousLeftmost);
 
         fillToGalleryRight();
         fillToGalleryLeft();
@@ -1086,10 +1096,6 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
      */
     void onUp() {
 
-        if (mFlingRunnable.mScroller.isFinished()) {
-            scrollIntoSlots();
-        }
-
         dispatchUnpress();
     }
 
@@ -1420,7 +1426,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         /**
          * Tracks the decay of a fling scroll.
          */
-        private final Scroller mScroller;
+        private final OverScroller mScroller;
 
         /**
          * X value reported by mScroller on the previous fling.
@@ -1431,7 +1437,8 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
          * Constructor.
          */
         public FlingRunnable() {
-            mScroller = new Scroller(getContext());
+            mScroller = new OverScroller(getContext(), new DecelerateInterpolator());
+            mScroller.setFriction(0.00001f);
         }
 
         // CHECKSTYLE:OFF unmodified
@@ -1481,13 +1488,13 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         public void run() {
 
             if (mItemCount == 0) {
-                endFling(true);
+                endFling(false);
                 return;
             }
 
             mShouldStopFling = false;
 
-            final Scroller scroller = mScroller;
+            final OverScroller scroller = mScroller;
             final boolean more = scroller.computeScrollOffset();
             final int x = scroller.getCurrX();
 
@@ -1518,7 +1525,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
                 mLastFlingX = x;
                 post(this);
             } else {
-               endFling(true);
+               endFling(false);
             }
         }
 
