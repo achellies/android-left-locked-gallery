@@ -23,7 +23,10 @@ package com.scvngr.levelup.views.gallery;
 import android.R;
 import android.content.Context;
 import android.graphics.Rect;
+import android.os.Parcel;
+import android.os.Parcelable;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.ContextMenu.ContextMenuInfo;
 import android.view.GestureDetector;
 import android.view.Gravity;
@@ -34,9 +37,9 @@ import android.view.SoundEffectConstants;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
-import android.view.animation.DecelerateInterpolator;
 import android.view.animation.Transformation;
 
+//@formatter:off
 /**
  * A view that shows items in a center-locked, horizontally scrolling list.
  * <p>
@@ -57,7 +60,6 @@ import android.view.animation.Transformation;
  * @attr ref android.R.styleable#Gallery_gravity
  * CHECKSTYLE:ON
  */
-// @formatter:off
 public final class Gallery extends AbsSpinner implements GestureDetector.OnGestureListener {
 
     /**
@@ -65,6 +67,8 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
      * unsure whether the user is scrolling or flinging.
      */
     private static final int SCROLL_TO_FLING_UNCERTAINTY_TIMEOUT = 250;
+
+	public static final String TAG = Gallery.class.getSimpleName();
 
     /**
      * Horizontal spacing between items.
@@ -180,6 +184,10 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
 
 	private int mLastDeltaX;
 
+	private boolean mWrap;
+
+	private int mSelectedChildWidth;
+
     /**
      * Constructor.
      * @param context the context to inflate into
@@ -271,6 +279,27 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         mUnselectedAlpha = unselectedAlpha;
     }
 
+    /**
+     * When the Gallery gets to the beginning or end of the Adapter, it will
+     * wrap instead of stopping.
+     *
+     * @param wrap
+     */
+    public void setWrap(final boolean wrap){
+    	mWrap = wrap;
+    	setHorizontalFadingEdgeEnabled(false);
+    }
+
+    /**
+     * Sets the gallery to never stop scrolling until the user interacts with it. This is useful if the
+     * gallery's being used as an animation tool.
+     *
+     * @param keepon if true, will keep on scrolling infinitely.
+     */
+    public void setInfiniteScroll(final boolean keepon){
+        mFlingRunnable.setFriction(keepon ? 0 : ViewConfiguration.getScrollFriction());
+    }
+
     // CHECKSTYLE:OFF unchanged method
     @Override
     protected boolean getChildStaticTransformation(final View child, final Transformation t) {
@@ -323,6 +352,101 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         return new Gallery.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
     }
+
+    @Override
+    protected void onDetachedFromWindow() {
+    	super.onDetachedFromWindow();
+    	pause();
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+    	super.onAttachedToWindow();
+    	resume();
+    }
+
+    @Override
+    protected void onWindowVisibilityChanged(int visibility) {
+    	switch (visibility){
+    		case View.VISIBLE:
+    			resume();
+    			break;
+
+    		case View.INVISIBLE:
+    		case View.GONE:
+    			if (!mPaused){
+    				Log.w(TAG, "Missing call to pause() from your activity's onPause()");
+    				pause();
+    			}
+    			break;
+    	}
+    }
+
+    public int getVelocity(){
+    	return mFlingRunnable.getVelocity();
+    }
+
+    public void setVelocity(int velocity){
+    	mFlingRunnable.startUsingVelocity(velocity);
+    }
+
+    public float getFramesPerSecond(){
+    	if (mSelectedChildWidth > 0){
+    		return (float)getVelocity() / mSelectedChildWidth;
+    	}else{
+    		return 0;
+    	}
+    }
+
+    public float getInterframeDelay(){
+    	float fps = getFramesPerSecond();
+    	if (fps == 0){
+    		return 0;
+    	}
+    	return (1/fps) * 1000;
+    }
+
+    public void setInterframeDelay(int delay){
+    	float velocity = (1/ (delay / 1000.0f)) * mSelectedChildWidth;
+    	setVelocity((int) velocity);
+    }
+
+    private int mSavedVelocity;
+    private boolean mPaused = true;
+
+    public void pause(){
+    	if (!mPaused){
+	    	mSavedVelocity = getVelocity();
+	    	mFlingRunnable.stop(false);
+	    	mPaused = true;
+    	}
+    }
+
+    public void resume(){
+    	if (mPaused){
+	    	if (mSavedVelocity != 0){
+	    		mFlingRunnable.startUsingVelocity(mSavedVelocity);
+	    	}
+	    	mPaused = false;
+    	}
+    }
+
+    @Override
+    public Parcelable onSaveInstanceState() {
+    	Parcelable superState = super.onSaveInstanceState();
+    	mSavedVelocity = getVelocity();
+    	return new SavedState(superState, mSavedVelocity);
+    }
+
+    @Override
+    public void onRestoreInstanceState(Parcelable state) {
+
+    	SavedState ss = (SavedState) state;
+    	super.onRestoreInstanceState(ss.getSuperState());
+
+    	mSavedVelocity = ss.mVelocity;
+    }
+
 
     @Override
     protected void onLayout(final boolean changed, final int l, final int t, final int r,
@@ -506,7 +630,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         detachViewsFromParent(start, count);
 
         if (toLeft != mIsRtl) {
-            mFirstPosition += count;
+            mFirstPosition = (mFirstPosition + count) % mItemCount;
         }
     }
 
@@ -590,7 +714,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
             }
         }
 
-        final int newPos = mFirstPosition + newSelectedChildIndex;
+        final int newPos = mWrap ? (mFirstPosition + newSelectedChildIndex) % mItemCount : mFirstPosition + newSelectedChildIndex;
 
         if (newPos != mSelectedPosition) {
             setSelectedPositionInt(newPos);
@@ -672,6 +796,8 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         fillToGalleryRight();
         fillToGalleryLeft();
 
+        mSelectedChildWidth = sel.getWidth();
+
         // Flush any cached views that did not get reused above
         mRecycler.clear();
 
@@ -743,7 +869,19 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
             mShouldStopFling = true;
         }
 
-        while (curRightEdge > galleryLeft && curPosition >= 0) {
+    	if (mWrap){
+    		if (curPosition < 0){
+    			curPosition += mItemCount;
+    		}
+    	}
+
+        while (curRightEdge > galleryLeft && (mWrap || (curPosition >= 0))) {
+        	if (mWrap){
+        		if (curPosition < 0){
+        			curPosition += mItemCount;
+        		}
+        	}
+
             prevIterationView = makeAndAddView(curPosition, curPosition - mSelectedPosition,
                     curRightEdge, false);
 
@@ -815,7 +953,14 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
             mShouldStopFling = true;
         }
 
-        while (curLeftEdge < galleryRight && curPosition < numItems) {
+        if (mWrap){
+        	curPosition %= mItemCount;
+        }
+
+        while (curLeftEdge < galleryRight && (mWrap || (curPosition < numItems))) {
+        	if (mWrap){
+        		curPosition %= mItemCount;
+        	}
             prevIterationView = makeAndAddView(curPosition, curPosition - mSelectedPosition,
                     curLeftEdge, true);
 
@@ -1286,20 +1431,30 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
     }
 
     boolean movePrevious() {
-        if (mItemCount > 0 && mSelectedPosition > 0) {
-            /**
-             * used to be scrollToChild(mSelectedPosition - mFirstPosition - 1);
-             * Found that this did not work with trackball/keyboard navigation.
-             */
+        if (mWrap){
+            if (mSelectedPosition == 0){
+                mSelectedPosition = mItemCount;
+            }
+
             setSelection(mSelectedPosition - 1);
             return true;
-        } else {
-            return false;
+
+        }else{
+            if (mItemCount > 0 && mSelectedPosition > 0) {
+                /**
+                 * used to be scrollToChild(mSelectedPosition - mFirstPosition - 1);
+                 * Found that this did not work with trackball/keyboard navigation.
+                 */
+                setSelection(mSelectedPosition - 1);
+                return true;
+            } else {
+                return false;
+            }
         }
     }
 
     boolean moveNext() {
-        if (mItemCount > 0 && mSelectedPosition < mItemCount - 1) {
+        if (mItemCount > 0 && (mWrap || mSelectedPosition < mItemCount - 1)) {
             scrollToChild(mSelectedPosition - mFirstPosition + 1);
             return true;
         } else {
@@ -1338,7 +1493,10 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
 
         final View oldSelectedChild = mSelectedChild;
 
-        final View child = mSelectedChild = getChildAt(mSelectedPosition - mFirstPosition);
+        final View child = mSelectedChild = getChildAt(
+        		!mWrap || mSelectedPosition >= mFirstPosition ?
+        		(mSelectedPosition - mFirstPosition) :
+        			(mSelectedPosition - mFirstPosition) + mItemCount );
         if (child == null) {
             return;
         }
@@ -1426,7 +1584,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         /**
          * Tracks the decay of a fling scroll.
          */
-        private final OverScroller mScroller;
+        private final InfiniteScroller mScroller;
 
         /**
          * X value reported by mScroller on the previous fling.
@@ -1437,8 +1595,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
          * Constructor.
          */
         public FlingRunnable() {
-            mScroller = new OverScroller(getContext(), new DecelerateInterpolator());
-            mScroller.setFriction(0.00001f);
+            mScroller = new InfiniteScroller(getContext());
         }
 
         // CHECKSTYLE:OFF unmodified
@@ -1452,11 +1609,22 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
 
             startCommon();
 
+
             final int initialX = initialVelocity < 0 ? Integer.MAX_VALUE : 0;
             mLastFlingX = initialX;
+
             mScroller.fling(initialX, 0, initialVelocity, 0,
                     0, Integer.MAX_VALUE, 0, Integer.MAX_VALUE);
             post(this);
+        }
+
+        public void setFriction(float friction){
+            mScroller.setFriction(friction);
+        }
+
+        public int getVelocity(){
+
+        	return (int) mScroller.getCurrVelocity();
         }
 
         public void startUsingDistance(final int distance) {
@@ -1494,7 +1662,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
 
             mShouldStopFling = false;
 
-            final OverScroller scroller = mScroller;
+            final InfiniteScroller scroller = mScroller;
             final boolean more = scroller.computeScrollOffset();
             final int x = scroller.getCurrX();
 
@@ -1529,5 +1697,42 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
             }
         }
 
+    }
+
+    private static class SavedState extends BaseSavedState {
+
+    	private final int mVelocity;
+
+    	private SavedState(Parcelable superState, int velocity){
+    		super(superState);
+    		mVelocity = velocity;
+    	}
+
+		public SavedState(Parcel in) {
+			super(in);
+
+			mVelocity = in.readInt();
+		}
+
+		@Override
+		public void writeToParcel(Parcel dest, int flags) {
+			super.writeToParcel(dest, flags);
+			dest.writeInt(mVelocity);
+		}
+
+		@SuppressWarnings("unused")
+		public static final Parcelable.Creator<SavedState> CREATOR = new Creator<SavedState>(){
+
+			@Override
+			public SavedState createFromParcel(Parcel source) {
+				return new SavedState(source);
+			}
+
+			@Override
+			public SavedState[] newArray(int size) {
+				return new SavedState[size];
+			}
+
+		};
     }
 }
