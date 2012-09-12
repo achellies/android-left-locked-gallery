@@ -390,6 +390,9 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
     	mFlingRunnable.startUsingVelocity(velocity);
     }
 
+    /**
+     * @return the number of frames per second
+     */
     public float getFramesPerSecond(){
     	if (mSelectedChildWidth > 0){
     		return (float)getVelocity() / mSelectedChildWidth;
@@ -399,15 +402,31 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
     }
 
     public float getInterframeDelay(){
-    	float fps = getFramesPerSecond();
+    	final float fps = getFramesPerSecond();
     	if (fps == 0){
     		return 0;
     	}
     	return (1/fps) * 1000;
     }
 
-    public void setInterframeDelay(int delay){
-    	float velocity = (1/ (delay / 1000.0f)) * mSelectedChildWidth;
+    /**
+     * Sets the speed of the gallery such that the selected item is changed every <var>delay</var>ms.
+     * @param delay ms between frames
+     */
+    public void setInterframeDelay(final int delay){
+        // XXX hack. Why is this child the same size as its parent? That's not right
+        if (mInLayout || mSelectedChildWidth == getWidth()){
+            postDelayed(new Runnable() {
+
+                @Override
+                public void run() {
+                    setInterframeDelay(delay);
+
+                }
+            }, 500);
+            return;
+        }
+    	final float velocity = (1/ (delay / 1000.0f)) * mSelectedChildWidth;
     	setVelocity((int) velocity);
     }
 
@@ -433,7 +452,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
 
     @Override
     public Parcelable onSaveInstanceState() {
-    	Parcelable superState = super.onSaveInstanceState();
+    	final Parcelable superState = super.onSaveInstanceState();
     	mSavedVelocity = getVelocity();
     	return new SavedState(superState, mSavedVelocity);
     }
@@ -441,7 +460,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
     @Override
     public void onRestoreInstanceState(Parcelable state) {
 
-    	SavedState ss = (SavedState) state;
+    	final SavedState ss = (SavedState) state;
     	super.onRestoreInstanceState(ss.getSuperState());
 
     	mSavedVelocity = ss.mVelocity;
@@ -762,7 +781,7 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         // is used to layout out the selected item.
         int previousLeftmost = 0;
         if (getChildCount() > 1){
-	        View v = getChildAt(mLastDeltaX > 0 ? 0 : 1);
+	        final View v = getChildAt(mLastDeltaX > 0 ? 0 : 1);
 	        if (v != null){
 	           previousLeftmost = v.getLeft();
 	        }
@@ -1605,7 +1624,9 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         }
 
         public void startUsingVelocity(final int initialVelocity) {
-            if (initialVelocity == 0) return;
+            if (initialVelocity == 0) {
+                return;
+            }
 
             startCommon();
 
@@ -1628,7 +1649,9 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
         }
 
         public void startUsingDistance(final int distance) {
-            if (distance == 0) return;
+            if (distance == 0) {
+                return;
+            }
 
             startCommon();
 
@@ -1649,7 +1672,9 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
              */
             mScroller.forceFinished(true);
 
-            if (scrollIntoSlots) scrollIntoSlots();
+            if (scrollIntoSlots) {
+                scrollIntoSlots();
+            }
         }
 
         @Override
