@@ -356,6 +356,8 @@ public final class Gallery extends AbsSpinner implements GestureDetector.OnGestu
     @Override
     protected void onDetachedFromWindow() {
     	super.onDetachedFromWindow();
+    	mShouldStopFling = true;
+    	mFlingRunnable.stop(false);
     	pause();
     }
 
